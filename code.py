@@ -1,10 +1,8 @@
 import tkinter as tk
 from tkinter import messagebox, ttk
-import datetime
 import pandas as pd
 import plotly.express as px
-import os
-import kaleido
+import datetime
 
 class ExpenseTracker:
     def __init__(self, root):
@@ -13,7 +11,6 @@ class ExpenseTracker:
         self.root.geometry("1000x600")
         self.root.configure(bg="#f0f0f0")
         self.data = pd.DataFrame(columns=["Date", "Category", "Amount"])
-        self.current_category = ""
         self.create_widgets()
 
     def create_widgets(self):
@@ -23,7 +20,6 @@ class ExpenseTracker:
         self.right_frame = tk.Frame(self.root, bg="#f0f0f0")
         self.right_frame.pack(side=tk.RIGHT, padx=20, pady=20, fill=tk.BOTH, expand=True)
 
-        
         self.date_var = tk.StringVar()
         self.category_var = tk.StringVar()
         self.amount_var = tk.StringVar()
@@ -43,7 +39,6 @@ class ExpenseTracker:
         self.amount_entry = tk.Entry(self.left_frame, textvariable=self.amount_var, font=("Arial", 12))
         self.amount_entry.grid(row=2, column=1, padx=5, pady=5)
 
-     
         self.add_button = tk.Button(self.left_frame, text="Add Expense", command=self.add_expense, bg="#4CAF50", fg="#FFFFFF", font=("Arial", 12, "bold"), relief="raised")
         self.add_button.grid(row=3, column=1, padx=5, pady=5)
 
@@ -83,27 +78,29 @@ class ExpenseTracker:
         scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
         self.table.configure(yscrollcommand=scroll_y.set)
 
+    def update_table(self):
+        for row in self.table.get_children():
+            self.table.delete(row)
         for row in self.data.itertuples(index=False):
-            self.table.insert("", "end", values=row)
+            self.table.insert("", "end", values=(row.Date, row.Category, row.Amount))
 
     def on_window_mapped(self, event):
-        if self.root.winfo_width() >= 1000:
-            self.update_pie_chart()
-            self.pie_frame.pack(fill=tk.BOTH, expand=True)
-        else:
-            self.pie_frame.pack_forget()
+        self.update_pie_chart()
 
     def update_pie_chart(self):
+        if len(self.data) == 0:
+            return
+
         daily_data = self.data
         daily_pie = px.pie(daily_data, values="Amount", names="Category", title="Daily Expense Spending")
         daily_pie.update_layout(width=400, height=400)
         daily_pie.update_traces(textposition="inside", textinfo="percent+label")
 
-        self.pie_canvas = tk.Canvas(self.pie_frame, bg="#f0f0f0")
-        self.pie_canvas.pack(fill=tk.BOTH, expand=True)
-
         daily_pie.write_image("pie_chart.png")
         pie_image = tk.PhotoImage(file="pie_chart.png")
+        
+        self.pie_canvas = tk.Canvas(self.pie_frame, bg="#f0f0f0")
+        self.pie_canvas.pack(fill=tk.BOTH, expand=True)
         self.pie_canvas.create_image(0, 0, anchor=tk.NW, image=pie_image)
         self.pie_canvas.image = pie_image
 
@@ -129,16 +126,18 @@ class ExpenseTracker:
             return
 
         if is_adding:
-            self.data = self.data.append({"Date": date, "Category": category, "Amount": amount}, ignore_index=True)
+            new_row = pd.DataFrame({"Date": [date], "Category": [category], "Amount": [amount]})
+            self.data = pd.concat([self.data, new_row], ignore_index=True)
         else:
             index = self.data.index[(self.data["Date"] == date) & (self.data["Category"] == category)]
             if len(index) == 0:
                 messagebox.showerror("Error", "Expense not found")
                 return
-
             self.data.loc[index, "Amount"] = amount
 
+        self.update_table()
         self.clear_entries()
+        self.update_pie_chart()
 
     def delete_expense(self):
         date = self.date_var.get()
@@ -150,7 +149,9 @@ class ExpenseTracker:
             return
 
         self.data.drop(index, inplace=True)
+        self.update_table()
         self.clear_entries()
+        self.update_pie_chart()
 
     def summary(self):
         summary = self.data.groupby(["Category"]).sum()
@@ -172,10 +173,10 @@ class ExpenseTracker:
         month = today.replace(day=1)
         year = today.replace(month=1, day=1)
 
-        daily_data = self.data[(self.data["Date"] == today.strftime("%Y-%m-%d"))]
+        daily_data = self.data[self.data["Date"] == today.strftime("%Y-%m-%d")]
         weekly_data = self.data[(self.data["Date"] >= week.strftime("%Y-%m-%d")) & (self.data["Date"] <= today.strftime("%Y-%m-%d"))]
-        monthly_data = self.data[(self.data["Date"] >= month.strftime("%Y-%m-%d"))]
-        yearly_data = self.data[(self.data["Date"] >= year.strftime("%Y-%m-%d"))]
+        monthly_data = self.data[self.data["Date"] >= month.strftime("%Y-%m-%d")]
+        yearly_data = self.data[self.data["Date"] >= year.strftime("%Y-%m-%d")]
 
         px.line(daily_data, x="Date", y="Amount", color="Category", title="Daily Expenses").show()
         px.line(weekly_data, x="Date", y="Amount", color="Category", title="Weekly Expenses").show()
@@ -195,6 +196,7 @@ class Application(tk.Tk):
         self.title("Expense Tracker")
         self.geometry("1000x600")
         self.configure(bg="#f0f0f0")
+        self.expense_tracker = ExpenseTracker(self)
 
     def run_headlessly(self):
         while True:
