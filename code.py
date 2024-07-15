@@ -1,208 +1,341 @@
-import tkinter as tk
-from tkinter import messagebox, ttk
-import pandas as pd
-import plotly.express as px
+from tkinter import *
+from tkinter import ttk as ttk
+from tkinter import messagebox as mb
 import datetime
+import sqlite3
+from tkcalendar import DateEntry
 
-class ExpenseTracker:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Expense Tracker")
-        self.root.geometry("1000x600")
-        self.root.configure(bg="#f0f0f0")
-        self.data = pd.DataFrame(columns=["Date", "Category", "Amount"])
-        self.create_widgets()
+def listAllExpenses():
+    global dbconnector, data_table
+    data_table.delete(*data_table.get_children())
+    all_data = dbconnector.execute('SELECT * FROM ExpenseTracker')
+    data = all_data.fetchall()
+    for val in data:
+        data_table.insert('', END, values=val)
 
-    def create_widgets(self):
-        self.left_frame = tk.Frame(self.root, bg="#f0f0f0")
-        self.left_frame.pack(side=tk.LEFT, padx=20, pady=20, fill=tk.BOTH, expand=True)
+def viewExpenseInfo():
+    global data_table
+    global dateField, payee, description, amount, modeOfPayment
+    if not data_table.selection():
+        mb.showerror('No expense selected', 'Please select an expense from the table to view its details')
+        return
+    currentSelectedExpense = data_table.item(data_table.focus())
+    val = currentSelectedExpense['values']
+    expenditureDate = datetime.date(int(val[1][:4]), int(val[1][5:7]), int(val[1][8:]))
+    dateField.set_date(expenditureDate)
+    payee.set(val[2])
+    description.set(val[3])
+    amount.set(val[4])
+    modeOfPayment.set(val[5])
 
-        self.right_frame = tk.Frame(self.root, bg="#f0f0f0")
-        self.right_frame.pack(side=tk.RIGHT, padx=20, pady=20, fill=tk.BOTH, expand=True)
+def clearFields():
+    global description, payee, amount, modeOfPayment, dateField, data_table
+    todayDate = datetime.datetime.now().date()
+    description.set('')
+    payee.set('')
+    amount.set(0.0)
+    modeOfPayment.set('Cash')
+    dateField.set_date(todayDate)
+    data_table.selection_remove(*data_table.selection())
 
-        self.date_var = tk.StringVar()
-        self.category_var = tk.StringVar()
-        self.amount_var = tk.StringVar()
+def removeExpense():
+    if not data_table.selection():
+        mb.showerror('No record selected!', 'Please select a record to delete!')
+        return
 
-        date_label = tk.Label(self.left_frame, text="Date", bg="#f0f0f0", fg="#333333", font=("Arial", 12, "bold"))
-        date_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.date_entry = tk.Entry(self.left_frame, textvariable=self.date_var, font=("Arial", 12))
-        self.date_entry.grid(row=0, column=1, padx=5, pady=5)
+    currentSelectedExpense = data_table.item(data_table.focus())
+    valuesSelected = currentSelectedExpense['values']
+    confirmation = mb.askyesno('Are you sure?', f'Are you sure that you want to delete the record of {valuesSelected[2]}')
+    if confirmation:
+        dbconnector.execute('DELETE FROM ExpenseTracker WHERE ID=?', (valuesSelected[0],))
+        dbconnector.commit()
+        listAllExpenses()
+        mb.showinfo('Record deleted successfully!', 'The record you wanted to delete has been deleted successfully')
 
-        category_label = tk.Label(self.left_frame, text="Category", bg="#f0f0f0", fg="#333333", font=("Arial", 12, "bold"))
-        category_label.grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        self.category_entry = tk.Entry(self.left_frame, textvariable=self.category_var, font=("Arial", 12))
-        self.category_entry.grid(row=1, column=1, padx=5, pady=5)
+def removeAllExpenses():
+    confirmation = mb.askyesno('Are you sure?', 'Are you sure that you want to delete all the expense items from the database?', icon='warning')
+    if confirmation:
+        dbconnector.execute('DELETE FROM ExpenseTracker')
+        dbconnector.commit()
+        listAllExpenses()
+        mb.showinfo('All Expenses deleted', 'All the expenses were successfully deleted')
 
-        amount_label = tk.Label(self.left_frame, text="Amount", bg="#f0f0f0", fg="#333333", font=("Arial", 12, "bold"))
-        amount_label.grid(row=2, column=0, padx=5, pady=5, sticky="w")
-        self.amount_entry = tk.Entry(self.left_frame, textvariable=self.amount_var, font=("Arial", 12))
-        self.amount_entry.grid(row=2, column=1, padx=5, pady=5)
+def addAnotherExpense():
+    global dateField, payee, description, amount, modeOfPayment
+    global dbconnector
 
-        self.add_button = tk.Button(self.left_frame, text="Add Expense", command=self.add_expense, bg="#4CAF50", fg="#FFFFFF", font=("Arial", 12, "bold"), relief="raised")
-        self.add_button.grid(row=3, column=1, padx=5, pady=5)
+    if not dateField.get() or not payee.get() or not description.get() or not amount.get() or not modeOfPayment.get():
+        mb.showerror('Fields empty!', "Please fill all the missing fields before pressing the add button!")
+        return
+    dbconnector.execute(
+        'INSERT INTO ExpenseTracker (Date, Payee, Description, Amount, ModeOfPayment) VALUES (?, ?, ?, ?, ?)',
+        (dateField.get_date(), payee.get(), description.get(), amount.get(), modeOfPayment.get()))
+    dbconnector.commit()
+    clearFields()
+    listAllExpenses()
+    mb.showinfo('Expense added', 'The expense whose details you just entered has been added to the database')
 
-        self.edit_button = tk.Button(self.left_frame, text="Edit Expense", command=self.edit_expense, bg="#2196F3", fg="#FFFFFF", font=("Arial", 12, "bold"), relief="raised")
-        self.edit_button.grid(row=4, column=1, padx=5, pady=5)
+def editExistingExpense():
+    global dateField, amount, description, payee, modeOfPayment
+    global dbconnector, data_table
 
-        self.delete_button = tk.Button(self.left_frame, text="Delete Expense", command=self.delete_expense, bg="#F44336", fg="#FFFFFF", font=("Arial", 12, "bold"), relief="raised")
-        self.delete_button.grid(row=5, column=1, padx=5, pady=5)
+    if not data_table.selection():
+        mb.showerror('No expense selected!', 'You have not selected any expense in the table for us to edit; please do that!')
+        return
 
-        self.summary_button = tk.Button(self.left_frame, text="Summary", command=self.summary, bg="#9C27B0", fg="#FFFFFF", font=("Arial", 12, "bold"), relief="raised")
-        self.summary_button.grid(row=6, column=1, padx=5, pady=5)
+    currentSelectedExpense = data_table.item(data_table.focus())
+    content = currentSelectedExpense['values']
+    dbconnector.execute(
+        'UPDATE ExpenseTracker SET Date = ?, Payee = ?, Description = ?, Amount = ?, ModeOfPayment = ? WHERE ID = ?',
+        (dateField.get_date(), payee.get(), description.get(), amount.get(), modeOfPayment.get(), content[0]))
+    dbconnector.commit()
+    clearFields()
+    listAllExpenses()
+    mb.showinfo('Data edited', 'We have updated the data and stored it in the database as you wanted')
 
-        self.category_button = tk.Button(self.left_frame, text="Manage Categories", command=self.manage_categories, bg="#FFC107", fg="#FFFFFF", font=("Arial", 12, "bold"), relief="raised")
-        self.category_button.grid(row=7, column=1, padx=5, pady=5)
+def selectedExpenseToWords():
+    global data_table
+    if not data_table.selection():
+        mb.showerror('No expense selected!', 'Please select an expense from the table for us to read')
+        return
+    currentSelectedExpense = data_table.item(data_table.focus())
+    val = currentSelectedExpense['values']
+    msg = f'Your expense can be read like: \n"You paid {val[4]} to {val[2]} for {val[3]} on {val[1]} via {val[5]}"'
+    mb.showinfo('Here\'s how to read your expense', msg)
 
-        self.chart_button = tk.Button(self.left_frame, text="View Charts", command=self.view_charts, bg="#009688", fg="#FFFFFF", font=("Arial", 12, "bold"), relief="raised")
-        self.chart_button.grid(row=8, column=1, padx=5, pady=5)
-
-        self.table_frame = tk.Frame(self.left_frame, bg="#f0f0f0")
-        self.table_frame.grid(row=9, column=0, columnspan=2, padx=5, pady=5, sticky="nsew")
-
-        self.create_table()
-
-        self.pie_frame = tk.Frame(self.right_frame, bg="#f0f0f0")
-        self.pie_frame.pack(fill=tk.BOTH, expand=True)
-
-        self.root.bind("<Map>", self.on_window_mapped)
-
-    def create_table(self):
-        self.table = ttk.Treeview(self.table_frame, columns=("Date", "Category", "Amount"), show="headings")
-        self.table.heading("Date", text="Date")
-        self.table.heading("Category", text="Category")
-        self.table.heading("Amount", text="Amount")
-        self.table.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        scroll_y = tk.Scrollbar(self.table_frame, orient=tk.VERTICAL, command=self.table.yview)
-        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
-        self.table.configure(yscrollcommand=scroll_y.set)
-
-    def update_table(self):
-        for row in self.table.get_children():
-            self.table.delete(row)
-        for row in self.data.itertuples(index=False):
-            self.table.insert("", "end", values=(row.Date, row.Category, row.Amount))
-
-    def on_window_mapped(self, event):
-        self.update_pie_chart()
-
-    def update_pie_chart(self):
-        if len(self.data) == 0:
-            return
-
-        daily_data = self.data
-        daily_pie = px.pie(daily_data, values="Amount", names="Category", title="Daily Expense Spending")
-        daily_pie.update_layout(width=400, height=400)
-        daily_pie.update_traces(textposition="inside", textinfo="percent+label")
-
-        daily_pie.write_image("pie_chart.png")
-        pie_image = tk.PhotoImage(file="pie_chart.png")
-        
-        self.pie_canvas = tk.Canvas(self.pie_frame, bg="#f0f0f0")
-        self.pie_canvas.pack(fill=tk.BOTH, expand=True)
-        self.pie_canvas.create_image(0, 0, anchor=tk.NW, image=pie_image)
-        self.pie_canvas.image = pie_image
-
-    def add_expense(self):
-        self._add_or_edit_expense(True)
-
-    def edit_expense(self):
-        self._add_or_edit_expense(False)
-
-    def _add_or_edit_expense(self, is_adding):
-        date = self.date_var.get()
-        category = self.category_var.get()
-        amount = self.amount_var.get()
-
-        try:
-            amount = float(amount)
-        except ValueError:
-            messagebox.showerror("Error", "Invalid amount input. Please enter a valid number.")
-            return
-
-        if not date or not category or amount <= 0:
-            messagebox.showerror("Error", "Invalid input")
-            return
-
-        if is_adding:
-            new_row = pd.DataFrame({"Date": [date], "Category": [category], "Amount": [amount]})
-            self.data = pd.concat([self.data, new_row], ignore_index=True)
-        else:
-            index = self.data.index[(self.data["Date"] == date) & (self.data["Category"] == category)]
-            if len(index) == 0:
-                messagebox.showerror("Error", "Expense not found")
-                return
-            self.data.loc[index, "Amount"] = amount
-
-        self.update_table()
-        self.clear_entries()
-        self.update_pie_chart()
-
-    def delete_expense(self):
-        date = self.date_var.get()
-        category = self.category_var.get()
-
-        index = self.data.index[(self.data["Date"] == date) & (self.data["Category"] == category)]
-        if len(index) == 0:
-            messagebox.showerror("Error", "Expense not found")
-            return
-
-        self.data.drop(index, inplace=True)
-        self.update_table()
-        self.clear_entries()
-        self.update_pie_chart()
-
-    def summary(self):
-        summary = self.data.groupby(["Category"]).sum()
-        summary["Amount"] = summary["Amount"].round(2)
-        messagebox.showinfo("Summary", summary.to_string())
-
-    def manage_categories(self):
-        categories = self.data["Category"].unique().tolist()
-        categories_string = ", ".join(categories)
-        messagebox.showinfo("Manage Categories", categories_string)
-
-    def view_charts(self):
-        if len(self.data) == 0:
-            messagebox.showerror("Error", "No data available to create charts")
-            return
-
-        today = datetime.date.today()
-        week = today - datetime.timedelta(days=today.weekday())
-        month = today.replace(day=1)
-        year = today.replace(month=1, day=1)
-
-        daily_data = self.data[self.data["Date"] == today.strftime("%Y-%m-%d")]
-        weekly_data = self.data[(self.data["Date"] >= week.strftime("%Y-%m-%d")) & (self.data["Date"] <= today.strftime("%Y-%m-%d"))]
-        monthly_data = self.data[self.data["Date"] >= month.strftime("%Y-%m-%d")]
-        yearly_data = self.data[self.data["Date"] >= year.strftime("%Y-%m-%d")]
-
-        px.line(daily_data, x="Date", y="Amount", color="Category", title="Daily Expenses").show()
-        px.line(weekly_data, x="Date", y="Amount", color="Category", title="Weekly Expenses").show()
-        px.line(monthly_data, x="Date", y="Amount", color="Category", title="Monthly Expenses").show()
-        px.line(yearly_data, x="Date", y="Amount", color="Category", title="Yearly Expenses").show()
-
-        self.clear_entries()
-
-    def clear_entries(self):
-        self.date_var.set("")
-        self.category_var.set("")
-        self.amount_var.set("")
-
-class Application(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("Expense Tracker")
-        self.geometry("1000x600")
-        self.configure(bg="#f0f0f0")
-        self.expense_tracker = ExpenseTracker(self)
-
-    def run_headlessly(self):
-        while True:
-            self.update_idletasks()
-            self.update()
+def expenseToWordsBeforeAdding():
+    global dateField, description, amount, payee, modeOfPayment
+    if not dateField.get() or not payee.get() or not description.get() or not amount.get() or not modeOfPayment.get():
+        mb.showerror('Incomplete data', 'The data is incomplete, meaning fill all the fields first!')
+        return
+    msg = f'Your expense can be read like: \n"You paid {amount.get()} to {payee.get()} for {description.get()} on {dateField.get_date()} via {modeOfPayment.get()}"'
+    addQuestion = mb.askyesno('Read your record like: ', f'{msg}\n\nShould I add it to the database?')
+    if addQuestion:
+        addAnotherExpense()
+    else:
+        mb.showinfo('Ok', 'Please take your time to add this record')
 
 if __name__ == "__main__":
-    app = Application()
-    app.run_headlessly()
+    dbconnector = sqlite3.connect("Expense_Tracker.db")
+    dbcursor = dbconnector.cursor()
+    dbconnector.execute(
+        'CREATE TABLE IF NOT EXISTS ExpenseTracker (ID INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, Date DATETIME, Payee TEXT, Description TEXT, Amount FLOAT, ModeOfPayment TEXT)')
+    dbconnector.commit()
+
+    main_win = Tk()
+    main_win.title("EXPENSE TRACKER")
+    main_win.geometry("1415x650+400+100")
+    main_win.resizable(0, 0)
+    main_win.config(bg="#FFFAF0")
+
+    frameLeft = Frame(main_win, bg="#FFF8DC")
+    frameRight = Frame(main_win, bg="#DEB887")
+    frameL1 = Frame(frameLeft, bg="#FFF8DC")
+    frameL2 = Frame(frameLeft, bg="#FFF8DC")
+    frameL3 = Frame(frameLeft, bg="#FFF8DC")
+    frameR1 = Frame(frameRight, bg="#DEB887")
+    frameR2 = Frame(frameRight, bg="#DEB887")
+
+    frameLeft.pack(side=LEFT, fill="both")
+    frameRight.pack(side=RIGHT, fill="both", expand=True)
+    frameL1.pack(fill="both")
+    frameL2.pack(fill="both")
+    frameL3.pack(fill="both")
+    frameR1.pack(fill="both")
+    frameR2.pack(fill="both", expand=True)
+
+    headingLabel = Label(
+        frameL1,
+        text="EXPENSE TRACKER",
+        font=("Bahnschrift Condensed", "25"),
+        width=20,
+        bg="#8B4513",
+        fg="#FFFAF0"
+    )
+    subheadingLabel = Label(
+        frameL1,
+        text="Data Entry Frame",
+        font=("Bahnschrift Condensed", "15"),
+        width=20,
+        bg="#F5DEB3",
+        fg="#000000"
+    )
+    headingLabel.pack(fill="both")
+    subheadingLabel.pack(fill="both")
+
+    dateLabel = Label(
+        frameL2,
+        text="Date:",
+        font=("consolas", "11", "bold"),
+        bg="#FFF8DC",
+        fg="#000000"
+    )
+    descriptionLabel = Label(
+        frameL2,
+        text="Description:",
+        font=("consolas", "11", "bold"),
+        bg="#FFF8DC",
+        fg="#000000"
+    )
+    amountLabel = Label(
+        frameL2,
+        text="Amount:",
+        font=("consolas", "11", "bold"),
+        bg="#FFF8DC",
+        fg="#000000"
+    )
+    payeeLabel = Label(
+        frameL2,
+        text="Payee:",
+        font=("consolas", "11", "bold"),
+        bg="#FFF8DC",
+        fg="#000000"
+    )
+    modeLabel = Label(
+        frameL2,
+        text="Mode of \nPayment:",
+        font=("consolas", "11", "bold"),
+        bg="#FFF8DC",
+        fg="#000000"
+    )
+
+    dateLabel.grid(row=0, column=0, sticky=W, padx=10, pady=10)
+    descriptionLabel.grid(row=1, column=0, sticky=W, padx=10, pady=10)
+    amountLabel.grid(row=2, column=0, sticky=W, padx=10, pady=10)
+    payeeLabel.grid(row=3, column=0, sticky=W, padx=10, pady=10)
+    modeLabel.grid(row=4, column=0, sticky=W, padx=10, pady=10)
+
+    payee = StringVar()
+    modeOfPayment = StringVar(value="Cash")
+    amount = DoubleVar()
+    description = StringVar()
+    dateField = DateEntry(frameL2, font=("consolas", "11", "bold"), width=15, background="darkblue", foreground="white", date_pattern='yyyy-mm-dd')
+    descriptionField = Entry(frameL2, font=("consolas", "11", "bold"), width=29, textvariable=description)
+    amountField = Entry(frameL2, font=("consolas", "11", "bold"), width=29, textvariable=amount)
+    payeeField = Entry(frameL2, font=("consolas", "11", "bold"), width=29, textvariable=payee)
+    modeOpt = ttk.Combobox(frameL2, font=("consolas", "11", "bold"), width=27, textvariable=modeOfPayment)
+    modeOpt['values'] = ("Cash", "Cheque", "Card", "NEFT", "Other")
+    
+    dateField.grid(row=0, column=1, padx=10, pady=10)
+    descriptionField.grid(row=1, column=1, padx=10, pady=10)
+    amountField.grid(row=2, column=1, padx=10, pady=10)
+    payeeField.grid(row=3, column=1, padx=10, pady=10)
+    modeOpt.grid(row=4, column=1, padx=10, pady=10)
+
+    buttonAdd = Button(
+        frameL3,
+        text="Add Expense",
+        font=("consolas", "11", "bold"),
+        bg="#FFF8DC",
+        fg="#000000",
+        width=20,
+        relief=RIDGE,
+        command=addAnotherExpense
+    )
+    buttonEdit = Button(
+        frameL3,
+        text="Edit Expense",
+        font=("consolas", "11", "bold"),
+        bg="#FFF8DC",
+        fg="#000000",
+        width=20,
+        relief=RIDGE,
+        command=editExistingExpense
+    )
+    buttonClear = Button(
+        frameL3,
+        text="Clear Fields",
+        font=("consolas", "11", "bold"),
+        bg="#FFF8DC",
+        fg="#000000",
+        width=20,
+        relief=RIDGE,
+        command=clearFields
+    )
+    buttonRead = Button(
+        frameL3,
+        text="Read expense to me",
+        font=("consolas", "11", "bold"),
+        bg="#FFF8DC",
+        fg="#000000",
+        width=20,
+        relief=RIDGE,
+        command=expenseToWordsBeforeAdding
+    )
+
+    buttonAdd.grid(row=0, column=0, padx=10, pady=10)
+    buttonEdit.grid(row=0, column=1, padx=10, pady=10)
+    buttonClear.grid(row=1, column=0, padx=10, pady=10)
+    buttonRead.grid(row=1, column=1, padx=10, pady=10)
+
+    data_table = ttk.Treeview(frameR2, selectmode=BROWSE,
+                              columns=("ID", "Date", "Payee", "Description", "Amount", "Mode of Payment"))
+
+    X_scroller = Scrollbar(data_table, orient=HORIZONTAL, command=data_table.xview)
+    Y_scroller = Scrollbar(data_table, orient=VERTICAL, command=data_table.yview)
+    X_scroller.pack(side=BOTTOM, fill=X)
+    Y_scroller.pack(side=RIGHT, fill=Y)
+
+    data_table.config(yscrollcommand=Y_scroller.set, xscrollcommand=X_scroller.set)
+
+    data_table.heading("ID", text="S No.", anchor=CENTER)
+    data_table.heading("Date", text="Date", anchor=CENTER)
+    data_table.heading("Payee", text="Payee", anchor=CENTER)
+    data_table.heading("Description", text="Description", anchor=CENTER)
+    data_table.heading("Amount", text="Amount", anchor=CENTER)
+    data_table.heading("Mode of Payment", text="Mode of Payment", anchor=CENTER)
+
+    data_table.column("ID", width=50, anchor=CENTER)
+    data_table.column("Date", width=100, anchor=CENTER)
+    data_table.column("Payee", width=200, anchor=CENTER)
+    data_table.column("Description", width=300, anchor=CENTER)
+    data_table.column("Amount", width=100, anchor=CENTER)
+    data_table.column("Mode of Payment", width=150, anchor=CENTER)
+
+    data_table.pack(fill=BOTH, expand=TRUE)
+    listAllExpenses()
+
+    buttonDelete = Button(
+        frameR1,
+        text="Delete Expense",
+        font=("consolas", "11", "bold"),
+        bg="#DEB887",
+        fg="#000000",
+        relief=RIDGE,
+        command=removeExpense
+    )
+    buttonDeleteAll = Button(
+        frameR1,
+        text="Delete All Expenses",
+        font=("consolas", "11", "bold"),
+        bg="#DEB887",
+        fg="#000000",
+        relief=RIDGE,
+        command=removeAllExpenses
+    )
+    buttonView = Button(
+        frameR1,
+        text="View Expense",
+        font=("consolas", "11", "bold"),
+        bg="#DEB887",
+        fg="#000000",
+        relief=RIDGE,
+        command=viewExpenseInfo
+    )
+    buttonReadSelected = Button(
+        frameR1,
+        text="Read Selected",
+        font=("consolas", "11", "bold"),
+        bg="#DEB887",
+        fg="#000000",
+        relief=RIDGE,
+        command=selectedExpenseToWords
+    )
+
+    buttonDelete.grid(row=0, column=0, padx=10, pady=10)
+    buttonDeleteAll.grid(row=0, column=1, padx=10, pady=10)
+    buttonView.grid(row=0, column=2, padx=10, pady=10)
+    buttonReadSelected.grid(row=0, column=3, padx=10, pady=10)
+
+    main_win.update()
+    main_win.mainloop()
