@@ -2,6 +2,9 @@
 
 A desktop application built with Python and Tkinter that helps users track and manage their daily expenses. The application provides a user-friendly interface for recording, viewing, editing, and analyzing expense data.
 
+## Image
+![Image](https://github.com/user-attachments/assets/394ed108-87b0-4110-a5b8-4b03ba121948)
+
 ## Features 🚩
 
 - Add new expenses with details including date, payee, description, amount, and payment mode
